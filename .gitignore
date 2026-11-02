@@ -1,0 +1,47 @@
+# Secretos y credenciales locales
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.env
+!*.example.env
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+credentials.json
+credentials.*.json
+secrets.json
+secrets.*.json
+
+# Entornos, dependencias y cachés
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+node_modules/
+**/.claude/settings.local.json
+.claude/scratchpad/
+
+# Registros, temporales y respaldos
+*.log
+*.tmp
+*.temp
+*.swp
+*.bak
+*.backup
+*.backup_*
+
+# Datos/runtime locales
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+logs/
+workspaces/*
+!workspaces/.gitkeep
