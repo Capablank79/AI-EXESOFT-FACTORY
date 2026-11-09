@@ -7,7 +7,8 @@ Autor: Claude Code - EXESOFT AI FACTORY
 """
 
 import uuid
-from typing import Optional, Dict, Any
+from contextlib import contextmanager
+from typing import Optional, Dict, Any, List
 import psycopg
 import psycopg.errors
 from infrastructure.db import DatabaseError, get_pool
@@ -20,7 +21,19 @@ from infrastructure.repositories import (
     EventsRepository,
     QualityRepository,
     ProvidersRepository,
-    ArtifactsRepository
+    ArtifactsRepository,
+    OddHybridRepository
+)
+from infrastructure.services.consistency import (
+    ConsistencyService,
+    consistency_service,
+    EntityState,
+    VALID_PROJECT_TRANSITIONS,
+    VALID_TASK_TRANSITIONS,
+    VALID_RUN_TRANSITIONS,
+    StateTransitionError,
+    ConcurrencyError,
+    IdempotencyKey,
 )
 
 
@@ -38,12 +51,12 @@ class UnitOfWork:
             uow.projects.create_project(...)
             uow.planning.create_task(...)
             uow.events.emit_event(...)
-            uow.commit()  # Automático si el contexto termina sin excepciones
+            uow.commit()  # Requerido para persistir cambios
 
     Características:
     - Una sola conexión para toda la transacción
     - Rollback automático si hay excepción
-    - commit() explícito o automático al salir del contexto
+    - commit() explícito; rollback si no se confirma al salir del contexto
     - Aislamiento por tenant_id
     - No expone credenciales (usa pool configuración existente)
     """
@@ -71,6 +84,7 @@ class UnitOfWork:
         self._quality_repo: Optional[QualityRepository] = None
         self._providers_repo: Optional[ProvidersRepository] = None
         self._artifacts_repo: Optional[ArtifactsRepository] = None
+        self._odd_hybrid_repo: Optional[OddHybridRepository] = None
 
     def _get_connection(self) -> psycopg.Connection:
         """Get or create shared connection."""
@@ -138,6 +152,12 @@ class UnitOfWork:
             self._artifacts_repo = ArtifactsRepository(tenant_id=self.tenant_id, _conn=self._get_connection())
         return self._artifacts_repo
 
+    @property
+    def odd_hybrid(self) -> OddHybridRepository:
+        if self._odd_hybrid_repo is None:
+            self._odd_hybrid_repo = OddHybridRepository(tenant_id=self.tenant_id, _conn=self._get_connection())
+        return self._odd_hybrid_repo
+
     def __enter__(self) -> 'UnitOfWork':
         """Enter context, acquire connection."""
         self._get_connection()
@@ -167,7 +187,10 @@ class UnitOfWork:
 
         try:
             self._conn.commit()
-            self._committed = True
+            # A UoW may commit more than one logical batch before it exits.
+            # Later repository calls start a fresh transaction on the same connection.
+            self._committed = False
+            self._rolled_back = False
         except Exception as e:
             self._do_rollback()
             raise UnitOfWorkError(f"Commit failed: {e}") from e
@@ -201,6 +224,181 @@ class UnitOfWork:
             return True
         except Exception:
             return False
+
+    @contextmanager
+    def _read_connection(self):
+        """Use the shared transaction when active, otherwise borrow a read-only connection."""
+        if self._conn is not None:
+            yield self._conn
+        else:
+            with get_pool().connection() as conn:
+                yield conn
+
+    @staticmethod
+    def _row_value(row, key: str, position: int = 0):
+        """Accept both dict_row and tuple_row cursor factories."""
+        return row[key] if isinstance(row, dict) else row[position]
+
+    # ============== CONSISTENCY & IDEMPOTENCY ==============
+
+    def validate_project_transition(self, project_id: uuid.UUID, target_status: str) -> bool:
+        """Validate project state transition before commit."""
+        with self._read_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT status FROM projects WHERE id = %s", [str(project_id)])
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"Project {project_id} not found")
+
+            current_status = self._row_value(row, 'status')
+
+            # Import here to avoid circular import
+            from infrastructure.services.consistency import VALID_PROJECT_TRANSITIONS
+
+            if target_status not in VALID_PROJECT_TRANSITIONS.get(current_status, []):
+                valid = VALID_PROJECT_TRANSITIONS.get(current_status, [])
+                raise ValueError(
+                    f"Transición inválida: {current_status} -> {target_status}. "
+                    f"Transiciones válidas: {valid}"
+                )
+        return True
+
+    def validate_task_transition(self, task_id: uuid.UUID, target_status: str) -> bool:
+        """Validate task state transition before commit."""
+        with self._read_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT status FROM tasks WHERE id = %s", [str(task_id)])
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"Task {task_id} not found")
+
+            current_status = self._row_value(row, 'status')
+
+            from infrastructure.services.consistency import VALID_TASK_TRANSITIONS
+
+            if target_status not in VALID_TASK_TRANSITIONS.get(current_status, []):
+                valid = VALID_TASK_TRANSITIONS.get(current_status, [])
+                raise ValueError(
+                    f"Invalid task transition: {current_status} -> {target_status}. "
+                    f"Valid transitions: {valid}"
+                )
+        return True
+
+    def validate_run_transition(self, run_id: uuid.UUID, target_status: str) -> bool:
+        """Validate task run state transition before commit."""
+        with self._read_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT status FROM task_runs WHERE id = %s", [str(run_id)])
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"Task run {run_id} not found")
+
+            current_status = self._row_value(row, 'status')
+
+            from infrastructure.services.consistency import VALID_RUN_TRANSITIONS
+
+            if target_status not in VALID_RUN_TRANSITIONS.get(current_status, []):
+                valid = VALID_RUN_TRANSITIONS.get(current_status, [])
+                raise ValueError(
+                    f"Invalid run transition: {current_status} -> {target_status}. "
+                    f"Valid transitions: {valid}"
+                )
+        return True
+
+    def check_referential_integrity(self, project_id: uuid.UUID) -> Dict[str, bool]:
+        """Check whether a project's related records exist (read-only)."""
+        return self.verify_referential_integrity(project_id)
+
+    def execute_idempotent(self, key: 'IdempotencyKey', operation: callable) -> Any:
+        """Execute operation with idempotency guarantee."""
+        from infrastructure.services.consistency import consistency_service
+        return consistency_service.execute_idempotent(key, operation)
+
+    def create_idempotency_key(self, operation: str, entity_type: str, **kwargs) -> 'IdempotencyKey':
+        """Create idempotency key for operation."""
+        from infrastructure.services.consistency import IdempotencyKey
+        return IdempotencyKey.from_operation(operation, entity_type, **kwargs)
+
+    def check_version(self, entity_type: str, entity_id: uuid.UUID, expected_version: int) -> bool:
+        """Check optimistic lock version."""
+        table_map = {
+            'project': ('projects', 'version'),
+            'task': ('tasks', 'version'),
+            'spec': ('project_specs', 'version'),
+        }
+
+        if entity_type not in table_map:
+            raise ValueError(f"Unknown entity type: {entity_type}")
+
+        table, column = table_map[entity_type]
+
+        id_column = 'project_id' if entity_type == 'spec' else 'id'
+        with self._read_connection() as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT {column} FROM {table} WHERE {id_column} = %s", [str(entity_id)])
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"{entity_type} {entity_id} not found")
+
+            current_version = self._row_value(row, column)
+            if current_version != expected_version:
+                from infrastructure.services.consistency import ConcurrencyError
+                raise ConcurrencyError(
+                    f"Version conflict: expected {expected_version}, current {current_version}"
+                )
+        return True
+
+    def verify_referential_integrity(self, project_id: uuid.UUID) -> Dict[str, bool]:
+        """Verify referential integrity for project."""
+        checks = {}
+        with self._read_connection() as conn, conn.cursor() as cur:
+            # Project exists
+            cur.execute("SELECT 1 FROM projects WHERE id = %s", [str(project_id)])
+            checks['project_exists'] = cur.fetchone() is not None
+
+            # Tasks exist
+            cur.execute("SELECT 1 FROM tasks WHERE project_id = %s LIMIT 1", [str(project_id)])
+            checks['tasks_exist'] = cur.fetchone() is not None
+
+            # Spec exists
+            cur.execute("SELECT 1 FROM project_specs WHERE project_id = %s", [str(project_id)])
+            checks['spec_exists'] = cur.fetchone() is not None
+
+            # ODD doc exists
+            cur.execute("SELECT 1 FROM odd_documents WHERE project_id = %s", [str(project_id)])
+            checks['odd_doc_exists'] = cur.fetchone() is not None
+
+            # Runs exist
+            cur.execute("SELECT 1 FROM task_runs WHERE project_id = %s LIMIT 1", [str(project_id)])
+            checks['runs_exist'] = cur.fetchone() is not None
+
+            # ODD snapshots
+            cur.execute("SELECT 1 FROM odd_snapshots WHERE project_id = %s LIMIT 1", [str(project_id)])
+            checks['odd_snapshots_exist'] = cur.fetchone() is not None
+
+            # Project snapshots
+            cur.execute("SELECT 1 FROM project_snapshots WHERE project_id = %s LIMIT 1", [str(project_id)])
+            checks['project_snapshots_exist'] = cur.fetchone() is not None
+
+            return checks
+
+    def enforce_referential_integrity(self, project_id: uuid.UUID, cascade_delete: bool = False) -> bool:
+        """Enforce referential integrity for project."""
+        if self._conn is None:
+            raise UnitOfWorkError("No active connection")
+
+        from infrastructure.services.consistency import consistency_service
+
+        if not cascade_delete:
+            # Check for references before delete
+            checks = self.verify_referential_integrity(project_id)
+            referenced = {k: v for k, v in checks.items() if k != 'project_exists' and v}
+            if referenced:
+                raise ValueError(
+                    f"No se puede borrar el proyecto {project_id}: "
+                    f"existen referencias en {', '.join(referenced)}"
+                )
+        else:
+            raise NotImplementedError(
+                "Cascade delete requires an approved FK-aware implementation; no records deleted"
+            )
+        return True
 
 
 __all__ = [

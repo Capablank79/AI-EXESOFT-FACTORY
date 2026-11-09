@@ -1,16 +1,43 @@
 import tempfile
 import unittest
+import uuid
+import os
+import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 from engine.runtime import Runtime, Result
+from plan_approval_test_support import approve_test_plan
+from quality.evidence import record_evidence
+
+TENANT_ID = uuid.UUID('b66f93cd-2f3a-4215-a2ac-93a59a84b4d2')
+ENV_PATH = Path(__file__).resolve().parents[1] / '.env'
+if ENV_PATH.exists():
+    for line in ENV_PATH.read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if line and not line.startswith('#') and '=' in line:
+            key, value = line.split('=', 1)
+            os.environ.setdefault(key.strip(), value.strip())
 
 
 class FakeAdapter:
-    def __init__(self, result):
+    def __init__(self, result, evidence_agents=('developer', 'qa')):
         self.result=result
         self.calls=0
+        self.evidence_agents=set(evidence_agents)
     def execute(self,task,project,context):
         self.calls+=1
-        return self.result
+        evidence=()
+        if task['agent'] in self.evidence_agents and self.result.evidence:
+            output='Ran 1 test'
+            evidence=(record_evidence(context['workspace'], {
+                'schema':'exesoft.quality.test.v1', 'id':uuid.uuid4().hex,
+                'kind':'test', 'runner':'sandy', 'status':'passed',
+                'returncode':0, 'sandy_exit_code':0, 'output':output,
+                'output_sha256':hashlib.sha256(output.encode()).hexdigest(),
+                'tests_run':1, 'result_sha256':'0'*64, 'partial_ok':False,
+                'timestamp':datetime.now(timezone.utc).isoformat(),
+            }),)
+        return Result(self.result.success, self.result.summary, evidence, self.result.approved)
 
 
 class RuntimeTests(unittest.TestCase):
@@ -20,9 +47,10 @@ class RuntimeTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
     def build(self, adapters=None):
-        rt=Runtime(self.root,adapters)
+        rt=Runtime(self.root,adapters,tenant_id=TENANT_ID)
         pid=rt.orchestrator.create_project('Exesoft Factory','Crear motor de ejecución')
         rt.orchestrator.plan_skeleton(pid)
+        approve_test_plan(TENANT_ID, pid)
         return rt,pid
 
     def test_no_adapter_blocks_and_preserves_evidence(self):
@@ -44,7 +72,8 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(adapter.calls,6)
 
     def test_qa_cannot_self_approve_without_evidence(self):
-        ok=FakeAdapter(Result(True,'Listo'))
+        ok=FakeAdapter(Result(True,'Listo',('developer test evidence',),True),
+                       evidence_agents=('developer',))
         rt,pid=self.build({'pm':ok,'architect':ok,'ux':ok,'developer':ok,'qa':ok,'devops':ok})
         rt.run(pid,max_steps=12)
         self.assertEqual(rt.brain.get_project(pid)['status'],'blocked')
@@ -54,7 +83,7 @@ class RuntimeTests(unittest.TestCase):
         rt,pid=self.build()
         tid=rt.brain.tasks(pid)[0]['id']
         rt.brain.update_task(tid,'running',increment_attempts=True)
-        revived=Runtime(self.root)
+        revived=Runtime(self.root,tenant_id=TENANT_ID)
         self.assertEqual(revived.recover(pid),1)
         self.assertEqual(revived.brain.tasks(pid)[0]['status'],'pending')
 
@@ -64,7 +93,7 @@ class RuntimeTests(unittest.TestCase):
         adapters=dict.fromkeys(['pm','architect','ux','developer','qa','devops'],ok)
         rt,pid=self.build(adapters)
         rt.run(pid,max_steps=7)
-        restarted=Runtime(self.root,adapters)
+        restarted=Runtime(self.root,adapters,tenant_id=TENANT_ID)
         self.assertEqual(restarted.run(pid,max_steps=12)[-1]['state'],'done')
 
 

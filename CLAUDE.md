@@ -7,6 +7,7 @@ Objetivo: fábrica autónoma con Brain persistente, orquestador de estados, ODD,
 Antes de implementar: inspeccionar `docs/ARCHITECTURE.md`, `agents/CONTRACT.md`, `methodology/ODD.md` y código existente. Aplicar ODD proporcional; no regenerar todo para una corrección localizada.
 
 Reglas:
+- En PowerShell, usar el intérprete del proyecto mediante `. .\scripts\resolve-python.ps1` y `$FactoryPython`; el helper falla de forma segura si falta `.venv\Scripts\python.exe` o no es Python 3.12+.
 - Sin invenciones sobre tests: ejecutar y registrar evidencias.
 - Nunca publicar, gastar dinero, eliminar archivos fuera del workspace o exponer secretos sin autorización.
 - Aislar implementaciones en ramas Git y no alterar `freellmapi/`.

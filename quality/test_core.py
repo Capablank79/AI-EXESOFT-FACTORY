@@ -8,7 +8,7 @@ class CoreTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()
         self.root=Path(self.tmp.name)
-        self.app=Orchestrator(self.root)
+        self.app=Orchestrator(self.root, backend='sqlite')
     def tearDown(self):self.tmp.cleanup()
 
     def test_project_plan_and_recovery(self):
@@ -19,7 +19,7 @@ class CoreTests(unittest.TestCase):
         # First task (pm) ready
         self.assertEqual(len(self.app.ready_tasks(pid)),1)
         # Reload and verify count
-        self.assertEqual(len(Orchestrator(self.root).brain.tasks(pid)),6)
+        self.assertEqual(len(Orchestrator(self.root, backend='sqlite').brain.tasks(pid)),6)
         # Mark pm done -> architect should be next
         self.app.brain.update_task(tasks[0]['id'],'done')
         self.assertEqual(len(self.app.ready_tasks(pid)),1)

@@ -19,9 +19,36 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional, TypedDict
 from uuid import uuid4
 import json
+
+
+AcceptanceMethod = Literal[
+    "unit_test", "integration_test", "api_test", "ui_test",
+    "database_check", "security_test", "manual_review",
+]
+AcceptanceOperator = Literal[
+    "equals", "not_equals", "contains", "not_contains", "count_equals",
+    "exists", "not_exists", "matches", "state_is",
+]
+
+
+class AcceptanceVerification(TypedDict):
+    method: AcceptanceMethod
+    steps: list[dict[str, object]]
+
+
+class AcceptanceExpectedResult(TypedDict):
+    target: str
+    operator: AcceptanceOperator
+    value: object
+
+
+class AcceptanceCriterion(TypedDict):
+    description: str
+    verification: AcceptanceVerification
+    expected_result: AcceptanceExpectedResult
 
 
 def now() -> str:
@@ -34,7 +61,8 @@ class Spec:
     id: str                    # S001, S002...
     title: str
     description: str
-    acceptance: list[str]      # Criterios de aceptación (user strings verbatim)
+    # New plans use structured criteria; older ODD documents may contain strings.
+    acceptance: list[AcceptanceCriterion | str]
     created_at: str = field(default_factory=now)
     updated_at: str = field(default_factory=now)
 
@@ -43,7 +71,22 @@ class Spec:
         if self.acceptance:
             lines.append("### Acceptance Criteria")
             for i, ac in enumerate(self.acceptance, 1):
-                lines.append(f"- AC{i}: {ac}")
+                if isinstance(ac, dict):
+                    verification = ac.get("verification", {})
+                    expected = ac.get("expected_result", {})
+                    lines.append(f"- AC{i}: {ac.get('description', '')}")
+                    if isinstance(verification, dict):
+                        lines.append(
+                            f"  - Verification ({verification.get('method', '')}): "
+                            + json.dumps(verification.get("steps", []), ensure_ascii=False)
+                        )
+                    if isinstance(expected, dict):
+                        lines.append(
+                            f"  - Expected: {expected.get('target', '')} "
+                            f"{expected.get('operator', '')} {expected.get('value', '')}"
+                        )
+                else:
+                    lines.append(f"- AC{i}: {ac}")
         return "\n".join(lines)
 
 
@@ -76,7 +119,8 @@ class FeatureDocument:
     created_at: str = field(default_factory=now)
     updated_at: str = field(default_factory=now)
 
-    def add_spec(self, title: str, description: str, acceptance: list[str]) -> Spec:
+    def add_spec(self, title: str, description: str,
+                 acceptance: list[AcceptanceCriterion | str]) -> Spec:
         used = {int(s.id[1:]) for s in self.specs if s.id.startswith('S') and s.id[1:].isdigit()}
         number = 1
         while number in used: number += 1
@@ -233,13 +277,29 @@ class ODDEngine:
                           if task['agent']==odd_task.route and task['title']==odd_task.description), None)
             if match: self.brain.link_odd_task(project_id, odd_task.id, match['id'])
 
+    def acceptance_for_brain_task(self, project_id: str, brain_task_id: str):
+        """Return linked spec criteria, retaining structured fields and legacy strings."""
+        self.ensure_task_links(project_id)
+        odd_task_id = self.brain.odd_task_for_brain(project_id, brain_task_id)
+        if not odd_task_id:
+            return []
+        feature = self.load_feature(project_id)
+        if not feature:
+            return []
+        task = next((item for item in feature.tasks if item.id == odd_task_id), None)
+        if not task:
+            return []
+        spec = next((item for item in feature.specs if item.id == task.spec_id), None)
+        return list(spec.acceptance) if spec else []
+
     def sync_brain_task(self, project_id: str, brain_task_id: str, status: str, evidence=None):
         self.ensure_task_links(project_id)
         odd_task_id = self.brain.odd_task_for_brain(project_id, brain_task_id)
         if odd_task_id:
             self.update_task_status(project_id, odd_task_id, status, evidence=evidence)
 
-    def add_spec(self, project_id: str, title: str, description: str, acceptance: list[str]) -> Spec:
+    def add_spec(self, project_id: str, title: str, description: str,
+                 acceptance: list[AcceptanceCriterion | str]) -> Spec:
         fd = self.load_feature(project_id) or self.create_feature(project_id, "", "")
         spec = fd.add_spec(title, description, acceptance)
         fd.log_event("spec_added", f"Added spec {spec.id}: {title}", spec_id=spec.id)

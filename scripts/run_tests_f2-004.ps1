@@ -23,7 +23,11 @@ if (Test-Path $EnvFile) {
 }
 
 # Run Python tests
-$pythonCmd = "C:\AI-Factory\.venv\Scripts\python.exe"
+. (Join-Path $PSScriptRoot 'resolve-python.ps1')
+$pythonCmd = $FactoryPython
+$env:POSTGRES_DB = 'exesoft_test_f7004'
+$env:EXESOFT_TEST_POSTGRES_DB = 'exesoft_test_f7004'
+$env:EXESOFT_BACKUP_TEST_ENABLED = '0'
 $testScript = "C:\AI-Factory\scripts\run_f2004_tests.py"
 
 Write-Host "Ejecutando pruebas F2-004..." -ForegroundColor Yellow

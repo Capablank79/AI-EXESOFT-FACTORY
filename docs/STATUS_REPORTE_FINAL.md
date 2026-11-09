@@ -112,10 +112,10 @@ cd C:/AI-Factory
 .\scripts\check-autonomous.ps1
 
 # Opción 2: Verificar circuito interno
-python -c "from factory import run_verification; run_verification()"
+& 'C:\AI-Factory\.venv\Scripts\python.exe' -c "from factory import run_verification; run_verification()"
 
 # Opción 3: Crear nuevo proyecto
-python -c "from engine.orchestrator import Orchestrator; o = Orchestrator('C:/AI-Factory'); pid = o.create_project('Nombre', 'Descripción'); o.plan_skeleton(pid); print('PID:', pid)"
+& 'C:\AI-Factory\.venv\Scripts\python.exe' -c "from engine.orchestrator import Orchestrator; o = Orchestrator('C:/AI-Factory'); pid = o.create_project('Nombre', 'Descripción'); o.plan_skeleton(pid); print('PID:', pid)"
 ```
 
 ---

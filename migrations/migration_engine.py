@@ -96,6 +96,19 @@ class MigrationEngine:
         key = int(hashlib.md5(f"migration_{migration_version}".encode()).hexdigest()[:16], 16)
         return key - (1 << 64) if key >= (1 << 63) else key
 
+    @staticmethod
+    def _verify_test_database_identity(conn) -> None:
+        """Confirm actual DB identity before guarded integration operations."""
+        if os.environ.get('EXESOFT_TEST_DATABASE_REQUIRED') != '1':
+            return
+        expected = os.environ.get('EXESOFT_TEST_POSTGRES_DB')
+        if expected != 'exesoft_test_f7004':
+            raise RuntimeError('PostgreSQL integration database is not authorized')
+        with conn.cursor() as cursor:
+            cursor.execute('SELECT current_database()')
+            if cursor.fetchone()[0] != expected:
+                raise RuntimeError('Connected PostgreSQL database identity mismatch')
+
     def test_connection(self) -> dict:
         """Prueba la conexión a PostgreSQL.
 
@@ -104,6 +117,7 @@ class MigrationEngine:
         """
         try:
             with psycopg.connect(self.database_url) as conn:
+                self._verify_test_database_identity(conn)
                 with conn.cursor() as cur:
                     cur.execute("SELECT current_user, current_database()")
                     user, db = cur.fetchone()
@@ -115,7 +129,7 @@ class MigrationEngine:
         except Exception as e:
             return {
                 'success': False,
-                'error': str(e)
+                'error': type(e).__name__
             }
 
     def up(self) -> dict:
@@ -129,6 +143,7 @@ class MigrationEngine:
 
         try:
             with self.pool.connection() as conn:
+                self._verify_test_database_identity(conn)
                 with conn.cursor() as cur:
                     # Verificar que schema_migrations existe
                     cur.execute("""
@@ -239,30 +254,38 @@ class MigrationEngine:
     def status(self) -> dict:
         """Muestra estado de migraciones."""
         self.pool.open()
-        results = {"applied": [], "pending": [], "missing": []}
+        results = {
+            "applied": [], "pending": [], "missing": [],
+            "checksum_mismatches": [],
+        }
 
         try:
             migrations = self._load_migrations()
 
             with self.pool.connection() as conn:
+                self._verify_test_database_identity(conn)
                 with conn.cursor() as cur:
+                    cur.execute('SELECT version, checksum, applied_at FROM schema_migrations')
+                    recorded = {row[0]: row for row in cur.fetchall()}
                     for migration in migrations:
-                        cur.execute(
-                            "SELECT version, applied_at FROM schema_migrations WHERE version = %s",
-                            (migration.version,)
-                        )
-                        existing = cur.fetchone()
-
+                        existing = recorded.pop(migration.version, None)
                         if existing:
                             results["applied"].append({
                                 "version": migration.version,
-                                "applied_at": existing[1].isoformat()
+                                "applied_at": existing[2].isoformat()
                             })
+                            if existing[1] != migration.checksum:
+                                results["checksum_mismatches"].append({
+                                    "version": migration.version,
+                                    "expected": migration.checksum,
+                                    "actual": existing[1],
+                                })
                         else:
                             results["pending"].append({
                                 "version": migration.version,
                                 "checksum": migration.checksum
                             })
+                    results['missing'] = sorted(recorded)
         finally:
             self.pool.close()
 
@@ -270,56 +293,47 @@ class MigrationEngine:
 
 
 def get_db_url() -> str:
-    """Construye URL de base de datos desde .env o parámetros.
+    """Build the migration URL from process environment or the project .env.
 
-    Lee .env desde el directorio raiz del proyecto.
-    Prioridad: parámetro de configuracion > .env > valores por defecto.
+    Credentials and database identity have no built-in defaults. Missing values
+    fail closed rather than silently targeting the production database.
     """
-    # Ruta al archivo .env
     env_path = Path(__file__).parent.parent / ".env"
-
-    # Variables con valores por defecto (usar amor2030 como especificado)
-    config = {
-        'user': 'exesoft_factory_migrator',
-        'password': 'amor2030',  # Usar amor2030 como especificado
-        'host': '127.0.0.1',
-        'port': '5432',
-        'db': 'exesoft_factory'
-    }
-
-    # Leer .env si existe
+    file_config = {}
     if env_path.exists():
         try:
-            with open(env_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if '=' in line and not line.startswith('#'):
-                        key, value = line.split('=', 1)
-                        key = key.strip()
-                        value = value.strip()
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    file_config[key.strip()] = value.strip().strip("\"'")
+        except OSError as exc:
+            raise RuntimeError("Could not read PostgreSQL migration configuration") from exc
 
-                        if key == 'POSTGRES_MIGRATOR_USER':
-                            config['user'] = value
-                        elif key == 'POSTGRES_MIGRATOR_PASSWORD':
-                            config['password'] = value
-                        elif key == 'POSTGRES_HOST':
-                            config['host'] = value
-                        elif key == 'POSTGRES_PORT':
-                            config['port'] = value
-                        elif key == 'POSTGRES_DB':
-                            config['db'] = value
-        except Exception:
-            pass
-
-    # Sobrescribir con variables de entorno si están definidas
-    config['password'] = os.environ.get('POSTGRES_MIGRATOR_PASSWORD', config['password'])
-    config['user'] = os.environ.get('POSTGRES_MIGRATOR_USER', config['user'])
-    config['host'] = os.environ.get('POSTGRES_HOST', config['host'])
-    config['port'] = os.environ.get('POSTGRES_PORT', config['port'])
-    config['db'] = os.environ.get('POSTGRES_DB', config['db'])
-
-    return f"postgresql://{config['user']}:{config['password']}@{config['host']}:{config['port']}/{config['db']}"
-
+    config = {
+        'user': os.environ.get('POSTGRES_MIGRATOR_USER') or file_config.get('POSTGRES_MIGRATOR_USER'),
+        'password': os.environ.get('POSTGRES_MIGRATOR_PASSWORD') or file_config.get('POSTGRES_MIGRATOR_PASSWORD'),
+        'host': os.environ.get('POSTGRES_HOST') or file_config.get('POSTGRES_HOST') or '127.0.0.1',
+        'port': os.environ.get('POSTGRES_PORT') or file_config.get('POSTGRES_PORT') or '5432',
+        # Require an explicit process target so a .env production default can
+        # never turn a bare migration command into production DDL.
+        'db': os.environ.get('POSTGRES_DB'),
+    }
+    missing = [key for key in ('user', 'password', 'db') if not config[key]]
+    if missing:
+        raise RuntimeError(
+            'Missing required PostgreSQL migration configuration: '
+            + ', '.join(missing)
+        )
+    if os.environ.get('EXESOFT_TEST_DATABASE_REQUIRED') == '1':
+        expected = os.environ.get('EXESOFT_TEST_POSTGRES_DB')
+        if (expected != 'exesoft_test_f7004' or config['db'] != expected
+                or os.environ.get('POSTGRES_DB') != expected):
+            raise RuntimeError('Migration test connection must target exesoft_test_f7004')
+    return psycopg.conninfo.make_conninfo(
+        host=config['host'], port=config['port'], dbname=config['db'],
+        user=config['user'], password=config['password'],
+    )
 
 def main():
     """CLI simple para el motor de migraciones."""
@@ -359,6 +373,16 @@ def main():
         print("Migraciones pendientes:")
         for m in status['pending']:
             print(f"  PENDIENTE {m['version']}")
+        if status['checksum_mismatches']:
+            print("Migraciones con checksum inconsistente:")
+            for item in status['checksum_mismatches']:
+                print(f"  ERROR {item['version']}")
+        if status['missing']:
+            print("Versiones aplicadas sin archivo local:")
+            for version in status['missing']:
+                print(f"  ERROR {version}")
+        if status['checksum_mismatches'] or status['missing']:
+            sys.exit(1)
     else:
         print(f"Comando desconocido: {command}")
         sys.exit(1)

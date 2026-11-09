@@ -1,8 +1,11 @@
 # EXESOFT AI FACTORY --- TASK BACKLOG
 
 **Documento rector:** `MASTER_ROADMAP.md`\
-**Estado actual:** F0 aprobada; F1-001, F1-002, F2-001 y F2-002 READY_FOR_REVIEW;
-F3-F8 bloqueadas.
+**Estado vigente (2026-11-06):** F0–F7 APPROVED; F8-001, F8-002 y F8-003 APPROVED; F8-004 IN_PROGRESS.
+
+El estado vigente y la tabla final son canónicos. Los campos de estado en las
+descripciones heredadas más abajo son capturas históricas y no reflejan las
+aprobaciones posteriores del operador.
 
 ## Reglas
 
@@ -81,13 +84,20 @@ migraciones. No avanzar a F1-002 hasta aprobación expresa.
 ## F3 --- Brain y ODD
 
 -   **EXF-F3-001:** Brain sobre PostgreSQL: memoria de trabajo,
-    episódica y semántica.
+    episódica y semántica. **READY_FOR_REVIEW**
+    - Evidencia: `brain/postgres_store.py`, `docs/EXF-F3-001_RESULTADO.md`
+    - Pruebas: `tests/test_brain_f3001_simple.py`, `scripts/run_tests_f3001.ps1`
+
 -   **EXF-F3-002:** ODD híbrido: JSONB vigente, specs/tasks relacionales
-    y snapshots inmutables.
+    y snapshots inmutables. **READY_FOR_REVIEW**
+    - Evidencia: `infrastructure/repositories/odd_hybrid.py`, `docs/EXF-F3-002_RESULTADO.md`
+    - Pruebas: `tests/test_odd_hybrid_f3002.py`, `scripts/run_tests_f3002.ps1`
+    - 19 pruebas funcionales pasadas
+
 -   **EXF-F3-003:** FTS; pgvector solo si está disponible, validado y
-    aprobado.
+    aprobado. **BLOCKED**
 -   **EXF-F3-004:** idempotencia, versiones, estados y referencias a
-    Runtime. **Puerta F3:** carga/actualización repetible, historial
+    Runtime. **BLOCKED** **Puerta F3:** carga/actualización repetible, historial
     íntegro y sincronización demostrada.
 
 ## F4 --- Runtime y Orchestrator
@@ -143,41 +153,16 @@ migraciones. No avanzar a F1-002 hasta aprobación expresa.
     documentación. **Puerta F8:** informe final respaldado por
     evidencias; no declarar producción lista con fallos.
 
-## Registro de avance
+## Estado vigente y aprobaciones
 
-  -----------------------------------------------------------------------
-  ID                      Estado                  Evidencia / decisión
-  ----------------------- ----------------------- -----------------------
-  EXF-F0-001              APPROVED                 Auditoría aprobada
-                                                  por operador
+| Alcance | Estado vigente |
+| --- | --- |
+| F0–F7 (todas las tareas) | APPROVED |
+| EXF-F8-001 | APPROVED |
+| EXF-F8-002 | APPROVED |
+| EXF-F8-003 | APPROVED |
+| EXF-F8-004 | IN_PROGRESS |
 
-  EXF-F1-001              READY_FOR_REVIEW         Informe en docs/
-                                                  EXF-F1-001_RESULTADO.md
-
-  EXF-F1-002              IN_PROGRESS              migrations/ (12 archivos SQL)
-                                                  docs/EXF-F1-002_MIGRACIONES.md
-                                                  quality/test_migrations.py
-
-  EXF-F2-001              READY_FOR_REVIEW         infrastructure/db.py
-                                                  tests/test_db_connection.py
-                                                  scripts/test_db_manual.py
-                                                  tests/TEST_DB_CONNECTION.md
-
-  EXF-F2-002              READY_FOR_REVIEW         infrastructure/repositories/
-                                                  (9 repositorios completados)
-                                                  Prueba real APP: 10 aprobadas,
-                                                  0 fallidas; CRUD y rollback
-
-  EXF-F2-003              READY_FOR_REVIEW         infrastructure/uow.py
-                                                  tests/test_uow.py
-                                                  Pruebas reales APP:
-                                                  8 aprobadas, 0 fallidas
-
-  EXF-F2-004              READY_FOR_REVIEW         infrastructure/repositories/
-                                                  scripts/test_f2004_pending.py
-                                                  scripts/run_tests_f2004.ps1
-                                                  8 pruebas base + 6 pendientes
-
-  EXF-F1-003 a EXF-F8-004 BLOCKED                 Requieren revisión y
-                                                  autorización secuencial
-  -----------------------------------------------------------------------
+Las aprobaciones F0–F8-003 fueron confirmadas por el operador. EXF-F8-004
+permanece activa hasta completar la auditoría y su remediación; no iniciar
+trabajo posterior al roadmap.

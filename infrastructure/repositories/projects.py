@@ -31,6 +31,10 @@ class Project:
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
+    def __getitem__(self, key: str):
+        """Support legacy callers that treated project results as mappings."""
+        return getattr(self, key)
+
 
 @dataclass
 class ProjectSpec:
@@ -66,15 +70,29 @@ class ProjectsRepository(Repository):
         request: Optional[dict] = None,
         spec_url: Optional[str] = None,
         priority: Optional[int] = None,
-        owner_user_id: Optional[uuid.UUID] = None
+        owner_user_id: Optional[uuid.UUID] = None,
+        project_id: Optional[uuid.UUID] = None
     ) -> Project:
-        """Crear un nuevo proyecto."""
-        query = """
-        INSERT INTO projects (tenant_id, name, slug, description, request, spec_url, priority, owner_user_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """Crear un nuevo proyecto (idempotente por slug único)."""
+        conflict_clause = (
+            "ON CONFLICT (id) DO UPDATE SET" if project_id is not None
+            else "ON CONFLICT (tenant_id, slug) DO UPDATE SET"
+        )
+        query = f"""
+        INSERT INTO projects (id, tenant_id, name, slug, description, request, spec_url, priority, owner_user_id)
+        VALUES (COALESCE(%s::uuid, gen_random_uuid()), %s, %s, %s, %s, %s, %s, %s, %s)
+        {conflict_clause}
+            name = EXCLUDED.name,
+            slug = EXCLUDED.slug,
+            description = EXCLUDED.description,
+            request = EXCLUDED.request,
+            spec_url = EXCLUDED.spec_url,
+            priority = EXCLUDED.priority,
+            updated_at = NOW()
         RETURNING *
         """
         params = [
+            str(project_id) if project_id else None,
             str(tenant_id), name, slug, description,
             Jsonb(request if request is not None else {}), spec_url, priority,
             str(owner_user_id) if owner_user_id else None
@@ -108,9 +126,13 @@ class ProjectsRepository(Repository):
 
     def update_project_status(self, project_id: uuid.UUID, status: str) -> bool:
         """Actualizar estado del proyecto."""
+        query = "UPDATE projects SET status = %s, updated_at = NOW() WHERE id = %s"
+        params = [status, str(project_id)]
+        if self.tenant_id is not None:
+            query += " AND tenant_id = %s"
+            params.append(str(self.tenant_id))
         return self._execute(
-            "UPDATE projects SET status = %s, updated_at = NOW() WHERE id = %s",
-            [status, str(project_id)]
+            query, params
         ) > 0
 
     def list_projects(
@@ -142,6 +164,17 @@ class ProjectsRepository(Repository):
     # ============== PROJECT SPECS ==============
     def save_project_spec(self, project_id: uuid.UUID, spec: dict) -> ProjectSpec:
         """Guardar especificación del proyecto."""
+        # Serialize specification changes with approval and execution claims.
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                lock_query = "SELECT id FROM projects WHERE id = %s"
+                lock_params = [str(project_id)]
+                if self.tenant_id is not None:
+                    lock_query += " AND tenant_id = %s"
+                    lock_params.append(str(self.tenant_id))
+                cur.execute(lock_query + " FOR UPDATE", lock_params)
+                if cur.fetchone() is None:
+                    raise ValueError('Project not found in the specification tenant')
         spec_json = str(spec)
         spec_hash = hashlib.sha256(spec_json.encode()).hexdigest()
 
@@ -156,14 +189,14 @@ class ProjectsRepository(Repository):
         """
         params = [str(project_id), Jsonb(spec), spec_hash]
 
-        row = self._fetch_one(query, params)
+        row = self._fetch_one(query, params, table_name="project_specs")
         return ProjectSpec(**row) if row else None
 
     def get_project_spec(self, project_id: uuid.UUID) -> Optional[ProjectSpec]:
         """Obtener especificación del proyecto."""
         row = self._fetch_one(
             "SELECT * FROM project_specs WHERE project_id = %s",
-            [str(project_id)]
+            [str(project_id)], table_name="project_specs"
         )
         return ProjectSpec(**row) if row else None
 

@@ -84,7 +84,7 @@ Implementación del Repository Pattern sobre PostgreSQL con Psycopg 3, sin ORM.
 
 ```bash
 # Verificar imports
-python scripts/test_repositories_manual.py
+& 'C:\AI-Factory\.venv\Scripts\python.exe' scripts/test_repositories_manual.py
 ```
 
 ## Estado

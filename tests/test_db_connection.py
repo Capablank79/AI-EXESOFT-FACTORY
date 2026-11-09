@@ -19,6 +19,16 @@ import pytest
 from unittest.mock import patch, MagicMock, PropertyMock
 import time
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ENV_PATH = os.path.join(ROOT, '.env')
+if os.path.exists(ENV_PATH):
+    with open(ENV_PATH, encoding='utf-8') as env_file:
+        for env_line in env_file:
+            env_line = env_line.strip()
+            if env_line and not env_line.startswith('#') and '=' in env_line:
+                env_key, env_value = env_line.split('=', 1)
+                os.environ.setdefault(env_key.strip(), env_value.strip())
+
 # Agregar src al path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -37,7 +47,7 @@ class TestDBConnectionBasic:
         os.environ['POSTGRES_APP_USER'] = 'exesoft_factory_app'
         os.environ['POSTGRES_HOST'] = '127.0.0.1'
         os.environ['POSTGRES_PORT'] = '5432'
-        os.environ['POSTGRES_DB'] = 'exesoft_factory'
+        os.environ['POSTGRES_DB'] = 'exesoft_test_f7004'
 
         # Reset del módulo para obtener nueva configuración
         db_module._config = None
@@ -63,7 +73,7 @@ class TestDBConnectionBasic:
         assert config.user == 'exesoft_factory_app'
         assert config.host == '127.0.0.1'
         assert config.port == 5432
-        assert config.db == 'exesoft_factory'
+        assert config.db == 'exesoft_test_f7004'
         assert 'test_password_123' in config.to_url() or '***' in config.conninfo
 
     def test_connection_basic_url_format(self):
@@ -71,7 +81,7 @@ class TestDBConnectionBasic:
         url = db_module.get_db_url()
         assert url.startswith('postgresql://')
         assert 'exesoft_factory_app' in url
-        assert '127.0.0.1:5432/exesoft_factory' in url
+        assert '127.0.0.1:5432/exesoft_test_f7004' in url
         assert 'test_password_123' in url
 
 
@@ -86,7 +96,7 @@ class TestPoolReuse:
         os.environ['POSTGRES_APP_USER'] = 'exesoft_factory_app'
         os.environ['POSTGRES_HOST'] = '127.0.0.1'
         os.environ['POSTGRES_PORT'] = '5432'
-        os.environ['POSTGRES_DB'] = 'exesoft_factory'
+        os.environ['POSTGRES_DB'] = 'exesoft_test_f7004'
 
         db_module._config = None
         db_module.reset_pool()
@@ -140,7 +150,7 @@ class TestConnectionClose:
         os.environ['POSTGRES_APP_USER'] = 'exesoft_factory_app'
         os.environ['POSTGRES_HOST'] = '127.0.0.1'
         os.environ['POSTGRES_PORT'] = '5432'
-        os.environ['POSTGRES_DB'] = 'exesoft_factory'
+        os.environ['POSTGRES_DB'] = 'exesoft_test_f7004'
 
         db_module._config = None
 
@@ -182,7 +192,7 @@ class TestConnectionRecovery:
         os.environ['POSTGRES_APP_USER'] = 'exesoft_factory_app'
         os.environ['POSTGRES_HOST'] = '127.0.0.1'
         os.environ['POSTGRES_PORT'] = '5432'
-        os.environ['POSTGRES_DB'] = 'exesoft_factory'
+        os.environ['POSTGRES_DB'] = 'exesoft_test_f7004'
 
         db_module._config = None
         db_module.reset_pool()
@@ -238,7 +248,7 @@ class TestHealthCheck:
         os.environ['POSTGRES_APP_USER'] = 'exesoft_factory_app'
         os.environ['POSTGRES_HOST'] = '127.0.0.1'
         os.environ['POSTGRES_PORT'] = '5432'
-        os.environ['POSTGRES_DB'] = 'exesoft_factory'
+        os.environ['POSTGRES_DB'] = 'exesoft_test_f7004'
 
         db_module._config = None
         db_module.reset_pool()
@@ -317,7 +327,7 @@ class TestPoolConfigurableTimeouts:
         os.environ['POSTGRES_APP_USER'] = 'exesoft_factory_app'
         os.environ['POSTGRES_HOST'] = '127.0.0.1'
         os.environ['POSTGRES_PORT'] = '5432'
-        os.environ['POSTGRES_DB'] = 'exesoft_factory'
+        os.environ['POSTGRES_DB'] = 'exesoft_test_f7004'
 
         db_module._config = None
         db_module.reset_pool()
@@ -359,25 +369,20 @@ class TestConnectionManager:
 
     @pytest.fixture(autouse=True)
     def setup_env(self):
-        """Configurar variables de entorno para pruebas."""
-        self.original_password = os.environ.get('POSTGRES_APP_PASSWORD')
-        os.environ['POSTGRES_APP_PASSWORD'] = 'test_password_123'
-        os.environ['POSTGRES_APP_USER'] = 'exesoft_factory_app'
-        os.environ['POSTGRES_HOST'] = '127.0.0.1'
-        os.environ['POSTGRES_PORT'] = '5432'
-        os.environ['POSTGRES_DB'] = 'exesoft_factory'
-
-        db_module._config = None
+        """Use the configured app credential against the explicitly isolated DB."""
+        expected_db = 'exesoft_test_f7004'
+        if (os.environ.get('POSTGRES_DB') != expected_db
+                or os.environ.get('EXESOFT_TEST_POSTGRES_DB') != expected_db):
+            pytest.fail('Connection manager test requires both database variables to target exesoft_test_f7004')
+        if (not os.environ.get('POSTGRES_APP_USER')
+                or not os.environ.get('POSTGRES_APP_PASSWORD')):
+            pytest.fail('Connection manager test requires the existing app credentials from .env')
+        original_pool_config = db_module._pool_config
+        db_module.configure(db_module.PoolConfig(min_size=1, max_size=1, timeout=5.0))
         db_module.reset_pool()
-
         yield
-
-        if self.original_password:
-            os.environ['POSTGRES_APP_PASSWORD'] = self.original_password
-        else:
-            os.environ.pop('POSTGRES_APP_PASSWORD', None)
-
         db_module.reset_pool()
+        db_module.configure(original_pool_config)
 
     def test_context_manager(self):
         """Prueba 7: test_context_manager - Context managers funcionales."""
@@ -401,7 +406,7 @@ class TestTestConnection:
         os.environ['POSTGRES_APP_USER'] = 'exesoft_factory_app'
         os.environ['POSTGRES_HOST'] = '127.0.0.1'
         os.environ['POSTGRES_PORT'] = '5432'
-        os.environ['POSTGRES_DB'] = 'exesoft_factory'
+        os.environ['POSTGRES_DB'] = 'exesoft_test_f7004'
 
         db_module._config = None
         db_module.reset_pool()

@@ -13,6 +13,7 @@ Dominios implementados:
 - quality: quality_gates, validations, evidence
 - providers: providers, models, model_requests
 - artifacts: artifacts, artifact_storage, artifact_dependencies
+- odd_hybrid: documento ODD vigente, specs/tasks relacionales, snapshots históricos
 
 Autor: Claude Code - EXESOFT AI FACTORY
 """
@@ -27,6 +28,7 @@ from .events import EventsRepository, Event, AuditLog
 from .quality import QualityRepository, QualityGate, Validation, Evidence
 from .providers import ProvidersRepository, Provider, Model, ModelRequest
 from .artifacts import ArtifactsRepository, Artifact, ArtifactStorage, ArtifactDependency
+from .odd_hybrid import OddHybridRepository, OddDocument, OddSnapshot, OddTaskLink
 
 __all__ = [
     # Base
@@ -77,4 +79,9 @@ __all__ = [
     "Artifact",
     "ArtifactStorage",
     "ArtifactDependency",
+    # ODD Hybrid
+    "OddHybridRepository",
+    "OddDocument",
+    "OddSnapshot",
+    "OddTaskLink",
 ]

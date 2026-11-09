@@ -30,10 +30,10 @@ class ManualAdapter:
         return Result(False, 'Adapter no conectado: se requiere ejecución real del agente')
 
 
-class Runtime:
+class LegacySQLiteRuntime:
     def __init__(self, root, adapters=None):
         self.root = Path(root)
-        self.orchestrator = Orchestrator(self.root)
+        self.orchestrator = Orchestrator(self.root, backend='sqlite')
         self.brain = self.orchestrator.brain
         self.adapters = adapters or {}
         self.odd = ODDEngine(self.brain)
@@ -90,7 +90,9 @@ class Runtime:
         if adapter is None:
             return Result(False, 'Sin adaptador registrado para ' + task['agent'])
         context = {'workspace':str(self.root / 'workspaces' / project['id']),
-                   'request':project['request'], 'task_id':task['id']}
+                   'request':project['request'], 'task_id':task['id'],
+                   'acceptance_criteria':self.odd.acceptance_for_brain_task(
+                       project['id'], task['id'])}
         return adapter.execute(task, project, context)
 
     def step(self, pid):
@@ -160,3 +162,10 @@ class Runtime:
     def runs(self,pid):
         with self.brain.connect() as db:
             return [dict(row) for row in db.execute('SELECT * FROM task_runs WHERE project_id=? ORDER BY started_at,id',(pid,))]
+
+
+# PostgreSQL is the production default; the prior SQLite implementation stays
+# available for migration compatibility and isolated legacy workflows.
+from engine.postgres_runtime import PostgresRuntime
+
+Runtime = PostgresRuntime

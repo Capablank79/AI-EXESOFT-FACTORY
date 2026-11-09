@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from engine.agent_runtime import AgentRuntime
+from engine.agent_runtime import LegacyAgentRuntime as AgentRuntime
 from engine.agents import SandyDeveloperAdapter, SandyQAAdapter
 from engine.runtime import Result, now
 from engine.quality_gate import QualityGate

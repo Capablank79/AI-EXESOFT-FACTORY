@@ -29,6 +29,7 @@ node_modules/
 
 # Registros, temporales y respaldos
 *.log
+backups/
 *.tmp
 *.temp
 *.swp

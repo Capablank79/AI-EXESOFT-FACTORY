@@ -16,7 +16,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\check-agents.ps1
 - El adaptador FreeLLMAPI usa únicamente el endpoint local `127.0.0.1:3001/v1/chat/completions` y no ejecuta herramientas.
 - Las credenciales se leen solo desde variables de entorno (`EXESOFT_ROUTER_KEY`, `ANTHROPIC_AUTH_TOKEN`); nunca se guardan en SQLite.
 - Debe estar ejecutándose FreeLLMAPI. `ANTHROPIC_BASE_URL` debe valer `http://127.0.0.1:3001` para Claude Code.
-- La búsqueda Brain usa FTS5 con hasta cinco términos y cinco resultados; no se inyecta el historial completo.
+- AgentRuntime usa Brain PostgreSQL y busca hasta cinco términos con aislamiento por tenant/proyecto; no se inyecta el historial completo.
 - QA continúa siendo una compuerta preliminar en Runtime v0.2: **una respuesta de IA no constituye evidencia QA auténtica**. El adaptador actual no eleva `approved=True`, así que las tareas QA se bloquearán correctamente hasta disponer de verificación automatizada real.
 - Se aplican límites de turnos, tiempo de ejecución y reintentos. No se garantizan límites absolutos de tokens o gastos del proveedor.
 - Las pruebas usan dobles de ejecución; no implican conectividad real. Una prueba real debe ser explícitamente autorizada y supervisada.

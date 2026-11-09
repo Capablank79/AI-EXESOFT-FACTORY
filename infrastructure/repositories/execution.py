@@ -53,15 +53,16 @@ class ExecutionRepository(Repository):
         tenant_id: uuid.UUID,
         task_id: uuid.UUID,
         project_id: uuid.UUID,
-        agent_name: str
+        agent_name: str,
+        run_id: Optional[uuid.UUID] = None
     ) -> TaskRun:
         """Iniciar una corrida de tarea."""
         query = """
-        INSERT INTO task_runs (tenant_id, task_id, project_id, agent_name, status, started_at)
-        VALUES (%s, %s, %s, %s, 'running', NOW())
+        INSERT INTO task_runs (id, tenant_id, task_id, project_id, agent_name, status, started_at)
+        VALUES (COALESCE(%s::uuid, gen_random_uuid()), %s, %s, %s, %s, 'running', NOW())
         RETURNING *
         """
-        params = [str(tenant_id), str(task_id), str(project_id), agent_name]
+        params = [str(run_id) if run_id else None, str(tenant_id), str(task_id), str(project_id), agent_name]
 
         row = self._fetch_one(query, params)
         return TaskRun(**row) if row else None
@@ -82,8 +83,13 @@ class ExecutionRepository(Repository):
         RETURNING *
         """
         params = [status, summary, evidence or [], metrics, str(task_run_id)]
-
-        row = self._fetch_one(query, params)
+        if self.tenant_id is not None:
+            query = query.replace("WHERE id = %s", "WHERE id = %s AND tenant_id = %s")
+            params.append(str(self.tenant_id))
+        with self._get_connection() as conn:
+            with conn.cursor(row_factory=rows.dict_row) as cur:
+                cur.execute(query, params)
+                row = cur.fetchone()
         return TaskRun(**row) if row else None
 
     def get_task_run(self, task_run_id: uuid.UUID) -> Optional[TaskRun]:

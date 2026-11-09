@@ -34,23 +34,23 @@ class ConnectionLease:
     def __init__(self, external_conn: Optional[psycopg.Connection] = None):
         self.external_conn = external_conn
         self.managed_conn = None
+        self._connection_context = None
         self._is_managed = external_conn is None
 
     def __enter__(self) -> psycopg.Connection:
         if self.external_conn:
             return self.external_conn
-        with get_connection() as conn:
-            self.managed_conn = conn
-            return conn
+        self._connection_context = get_connection()
+        self.managed_conn = self._connection_context.__enter__()
+        return self.managed_conn
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         # No cerrar conexión si viene del UoW
-        if self.managed_conn and self._is_managed:
+        if self._connection_context and self._is_managed:
             try:
-                if exc_type:
-                    self.managed_conn.rollback()
-                # Don't commit - let pool handle it
+                self._connection_context.__exit__(exc_type, exc_val, exc_tb)
             finally:
+                self._connection_context = None
                 self.managed_conn = None
 
 
@@ -84,9 +84,19 @@ class Repository:
         """Get connection lease wrapper."""
         return ConnectionLease(self._external_conn)
 
-    def _apply_tenant_filter(self, query: str, params: list) -> tuple:
+    def _apply_tenant_filter(self, query: str, params: list, table_name: str = "tasks") -> tuple:
         """Apply tenant filter to query if tenant_id is set."""
         if self.tenant_id is not None:
+            # Solo aplicar si la tabla tiene tenant_id (truco: omitir si no tiene)
+            tables_without_tenant = ["odd_documents", "odd_snapshots", "project_specs", "project_snapshots", "projects", "knowledge"]
+            if table_name in tables_without_tenant:
+                return query, params
+
+            # No aplicar filtro en INSERT, solo en SELECT/UPDATE/DELETE
+            query_upper = query.strip().upper()
+            if query_upper.startswith('INSERT'):
+                return query, params
+
             if "WHERE" in query:
                 query = query.replace("WHERE", f"WHERE tenant_id = %s AND ", 1)
                 params.insert(0, str(self.tenant_id))
@@ -99,7 +109,8 @@ class Repository:
         self,
         query: str,
         params: list = None,
-        conn: Optional[psycopg.Connection] = None
+        conn: Optional[psycopg.Connection] = None,
+        table_name: str = "tasks"
     ) -> Optional[Dict[str, Any]]:
         """Execute query and fetch one row as dict.
 
@@ -107,7 +118,7 @@ class Repository:
         """
         if params is None:
             params = []
-        query, params = self._apply_tenant_filter(query, params)
+        query, params = self._apply_tenant_filter(query, params, table_name)
 
         # Convert dicts to Jsonb for JSONB columns
         from psycopg.types.json import Jsonb
@@ -133,7 +144,8 @@ class Repository:
         self,
         query: str,
         params: list = None,
-        conn: Optional[psycopg.Connection] = None
+        conn: Optional[psycopg.Connection] = None,
+        table_name: str = "tasks"
     ) -> List[Dict[str, Any]]:
         """Execute query and fetch all rows as dicts.
 
@@ -141,7 +153,7 @@ class Repository:
         """
         if params is None:
             params = []
-        query, params = self._apply_tenant_filter(query, params)
+        query, params = self._apply_tenant_filter(query, params, table_name)
 
         # Convert dicts to Jsonb for JSONB columns
         from psycopg.types.json import Jsonb
@@ -167,7 +179,8 @@ class Repository:
         self,
         query: str,
         params: list = None,
-        conn: Optional[psycopg.Connection] = None
+        conn: Optional[psycopg.Connection] = None,
+        table_name: str = "tasks"
     ) -> int:
         """Execute query (INSERT/UPDATE/DELETE) and return affected rows.
 

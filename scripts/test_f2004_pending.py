@@ -18,6 +18,9 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from postgres_test_guard import require_isolated_test_database
+require_isolated_test_database()
+
 from infrastructure.uow import UnitOfWork
 
 
@@ -70,7 +73,7 @@ class F2004PendingTests:
                 self.failed += 1
                 return False
         except Exception as e:
-            print(f"  FAIL: test_commit_between_repos - {e}")
+            print(f"  FAIL: test_commit_between_repos - {type(e).__name__}")
             self.failed += 1
             return False
 
@@ -116,7 +119,7 @@ class F2004PendingTests:
                 self.failed += 1
                 return False
         except Exception as e:
-            print(f"  FAIL: test_rollback_between_repos - {e}")
+            print(f"  FAIL: test_rollback_between_repos - {type(e).__name__}")
             self.failed += 1
             return False
 
@@ -168,7 +171,7 @@ class F2004PendingTests:
                 self.failed += 1
                 return False
         except Exception as e:
-            print(f"  FAIL: test_atomicity_during_exception - {e}")
+            print(f"  FAIL: test_atomicity_during_exception - {type(e).__name__}")
             self.failed += 1
             return False
 
@@ -280,7 +283,7 @@ class F2004PendingTests:
                 self.failed += 1
                 return False
         except Exception as e:
-            print(f"  FAIL: test_crud_nine_repos - {e}")
+            print(f"  FAIL: test_crud_nine_repos - {type(e).__name__}")
             self.failed += 1
             return False
 
@@ -338,7 +341,7 @@ class F2004PendingTests:
                 self.failed += 1
                 return False
         except Exception as e:
-            print(f"  FAIL: test_tenant_isolation - {e}")
+            print(f"  FAIL: test_tenant_isolation - {type(e).__name__}")
             self.failed += 1
             return False
 
@@ -361,7 +364,7 @@ class F2004PendingTests:
                     self.tenants_created.append(str(tenant.id))
                     uow.commit()
         except Exception as e:
-            print(f"  FAIL: test_concurrent_transactions - tenant setup: {type(e).__name__}: {e}")
+            print(f"  FAIL: test_concurrent_transactions - tenant setup: {type(e).__name__}")
             self.failed += 1
             return False
 
@@ -381,7 +384,7 @@ class F2004PendingTests:
             except Exception as e:
                 with lock:
                     results['fail'] += 1
-                    results['errors'][wid] = f"{type(e).__name__}: {e}"
+                    results['errors'][wid] = type(e).__name__
 
         try:
             threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]
@@ -399,7 +402,7 @@ class F2004PendingTests:
                 self.failed += 1
                 return False
         except Exception as e:
-            print(f"  FAIL: test_concurrent_transactions - {e}")
+            print(f"  FAIL: test_concurrent_transactions - {type(e).__name__}")
             self.failed += 1
             return False
 

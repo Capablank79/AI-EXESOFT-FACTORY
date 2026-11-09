@@ -114,7 +114,7 @@ class QualityRepository(Repository):
             VALUES (%s, %s, %s, %s, 'pending')
             RETURNING *
             """,
-            [str(quality_gate_id), str(project_id), str(task_id) if task_id else None,
+            [str(quality_gate_id) if quality_gate_id else None, str(project_id), str(task_id) if task_id else None,
              str(tenant_id) if tenant_id else None]
         )
         return Validation(**row) if row else None
@@ -134,17 +134,20 @@ class QualityRepository(Repository):
         finished_at: Optional[datetime] = None
     ) -> Validation:
         """Actualizar estado de validación."""
-        row = self._fetch_one(
-            """
+        query = """
             UPDATE validations
             SET status = %s, evidence = %s, metrics = %s, started_at = %s, finished_at = %s
             WHERE id = %s
-            RETURNING *
-            """,
-            [status, evidence or [], metrics,
-             started_at.isoformat() if started_at else None,
-             finished_at.isoformat() if finished_at else None,
-             str(validation_id)]
+        """
+        params = [status, evidence or [], metrics,
+                  started_at.isoformat() if started_at else None,
+                  finished_at.isoformat() if finished_at else None,
+                  str(validation_id)]
+        if self.tenant_id is not None:
+            query += " AND tenant_id = %s"
+            params.append(str(self.tenant_id))
+        row = self._fetch_one(
+            query + " RETURNING *", params, table_name='projects'
         )
         return Validation(**row) if row else None
 

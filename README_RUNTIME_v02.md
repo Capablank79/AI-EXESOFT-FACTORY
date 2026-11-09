@@ -1,6 +1,8 @@
 # Exesoft AI Factory — Orchestrator Runtime v0.2
 
-Actualización incremental sobre Core v0.1.1. Mantiene SQLite/FTS5 y no sobrescribe `brain/store.py` ni `engine/orchestrator.py`.
+Runtime y Orchestrator usan PostgreSQL mediante repositorios y UnitOfWork. Configure `POSTGRES_APP_PASSWORD` (o `POSTGRES_MIGRATOR_PASSWORD`) y `EXESOFT_TENANT_ID` antes de iniciar.
+
+`LegacySQLiteRuntime` y `Orchestrator(..., backend='sqlite')` se conservan para workflows de compatibilidad durante la migración; no son el backend predeterminado.
 
 ## Instalación
 

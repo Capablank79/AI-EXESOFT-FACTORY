@@ -91,7 +91,8 @@ class Brain:
             if not cur.rowcount: raise KeyError(project_id)
             db.execute('INSERT INTO events(project_id,type,detail,created_at) VALUES (?,?,?,?)',(project_id,'project.status',status,now))
 
-    def add_task(self, task_id, project_id, title, agent, depends_on=(), max_attempts=3):
+    def add_task(self, task_id, project_id, title, agent, depends_on=(), max_attempts=3,
+                 description=None):
         if max_attempts<1: raise ValueError('max_attempts debe ser positivo')
         now=utc_now()
         with self.connect() as db:

@@ -18,7 +18,8 @@ if ($dirty.Count) { throw "Sandy no está limpio ($($dirty -join ', ')); se abor
 Write-Warning 'Riesgo: estas pruebas crean AppContainers y permisos ACL temporales en una carpeta TEMP propia y en el runtime Python. Una interrupción puede dejar recuperación pendiente; el adaptador solo usa sandy --cleanup si el estado demuestra que todos los recursos stale pertenecen a esa carpeta.'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
-$python = if (Test-Path (Join-Path $root '.venv\Scripts\python.exe')) { Join-Path $root '.venv\Scripts\python.exe' } else { 'python' }
+. (Join-Path $PSScriptRoot 'resolve-python.ps1')
+$python = $FactoryPython
 & $python -B -m quality.sandy_validation
 $validationExit = $LASTEXITCODE
 if ($validationExit -ne 0) { throw "Sandy validation failed ($validationExit). Review the validation output and Sandy status." }
@@ -27,7 +28,7 @@ exit 0
 <# Retired inline validator; replaced by quality.sandy_validation. Kept inert during migration.
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $scriptDir
-$python = if (Test-Path (Join-Path $root '.venv\Scripts\python.exe')) { Join-Path $root '.venv\Scripts\python.exe' } else { 'python' }
+$python = Join-Path (Split-Path -Parent $scriptDir) '.venv\Scripts\python.exe'
 $work = Join-Path ([IO.Path]::GetTempPath()) ('exesoft-sandy-validation-' + [guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $work -Force)
 $testFile = Join-Path $work 'validate.py'

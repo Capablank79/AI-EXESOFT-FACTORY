@@ -53,10 +53,10 @@ migrations/
 
 ```bash
 # Aplicar migraciones
-python -m migrations.migration_engine up
+& 'C:\AI-Factory\.venv\Scripts\python.exe' -m migrations.migration_engine up
 
 # Ver estado
-python -m migrations.migration_engine status
+& 'C:\AI-Factory\.venv\Scripts\python.exe' -m migrations.migration_engine status
 ```
 
 ---

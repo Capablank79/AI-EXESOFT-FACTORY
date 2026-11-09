@@ -12,6 +12,7 @@ Tests:
 - Final state: project done with all tasks completed
 """
 import json
+import os
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -19,12 +20,22 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+ENV_PATH = Path(__file__).resolve().parents[1] / '.env'
+if ENV_PATH.exists():
+    for line in ENV_PATH.read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if line and not line.startswith('#') and '=' in line:
+            key, value = line.split('=', 1)
+            os.environ.setdefault(key.strip(), value.strip())
+
 from engine.autonomous import AutonomousEngine
 from engine.runtime import Result
 from engine.agents import SandyDeveloperAdapter, SandyQAAdapter
 from engine.sandy_adapter import SandYSandboxResult
 from factory import run_real_task, run_verification
 from quality.evidence import run_tests, record_evidence
+
+TENANT_ID = 'b66f93cd-2f3a-4215-a2ac-93a59a84b4d2'
 
 
 class E2EFactoyTests(unittest.TestCase):
@@ -80,14 +91,14 @@ class E2EFactoyTests(unittest.TestCase):
                     'developer':SandyDeveloperAdapter(sandbox=sandbox,model=model),
                     'qa':SandyQAAdapter(sandbox=sandbox), 'devops':model}
         result = run_real_task('Entry Point Test','Implement a tiny module',
-                               root=self.root,adapters=adapters)
+                               root=self.root,adapters=adapters,tenant_id=TENANT_ID)
         self.assertEqual(result['status'],'done')
         self.assertEqual([t['status'] for t in result['tasks']],['done']*6)
         self.assertTrue(result['quality_decisions'][0]['approved'])
         self.assertEqual(sandbox.last_argv[0], __import__('sys').executable)
 
     def test_internal_verification_uses_created_project_id(self):
-        self.assertTrue(run_verification(self.root))
+        self.assertTrue(run_verification(self.root, tenant_id=TENANT_ID))
 
     def test_real_task_stops_before_model_when_sandy_preflight_fails(self):
         class Sandbox:
@@ -99,7 +110,8 @@ class E2EFactoyTests(unittest.TestCase):
                 return self.execute_argv(workspace,[__import__('sys').executable,'-I','-c','pass'],timeout)
         sandbox=Sandbox()
         with patch('engine.sandy_adapter.SandySandboxAdapter.execution_context_error',return_value=''):
-            result=run_real_task('Blocked Sandy','Build a module',root=self.root,sandbox=sandbox)
+            result=run_real_task('Blocked Sandy','Build a module',root=self.root,sandbox=sandbox,
+                                 tenant_id=TENANT_ID)
         self.assertEqual(result['execution_status'],'blocked')
         self.assertEqual(result['status'],'planned')
         self.assertIn('registry grant setup failed',result['preflight'])

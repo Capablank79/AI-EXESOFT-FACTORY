@@ -25,6 +25,9 @@ if env_path.exists():
                 os.environ.setdefault(key.strip(), value.strip())
 
 # Importar infraestructura
+from postgres_test_guard import require_isolated_test_database
+require_isolated_test_database()
+
 from infrastructure.db import get_pool, close_pool, get_connection, health_check, reset_pool
 from infrastructure.uow import UnitOfWork
 
@@ -65,7 +68,7 @@ def test_create_tenant():
                 test("Tabla tenants accesible", True)
                 return True
     except Exception as e:
-        test("Tabla tenants accesible", False, str(e))
+        test("Tabla tenants accesible", False, type(e).__name__)
         return False
 
 
@@ -76,7 +79,7 @@ def test_connection_pool():
         test("Pool de conexiones", True)
         return True
     except Exception as e:
-        test("Pool de conexiones", False, str(e))
+        test("Pool de conexiones", False, type(e).__name__)
         return False
 
 
@@ -91,7 +94,7 @@ def test_uow_context_manager():
         test("UoW context manager", True)
         return True
     except Exception as e:
-        test("UoW context manager", False, str(e))
+        test("UoW context manager", False, type(e).__name__)
         return False
 
 
@@ -110,7 +113,7 @@ def test_no_autocommit():
             test("Autocommit deshabilitado", True)
         return True
     except Exception as e:
-        test("Autocommit deshabilitado", False, str(e))
+        test("Autocommit deshabilitado", False, type(e).__name__)
         return False
 
 
@@ -125,7 +128,7 @@ def test_repositories_tenant_isolation():
         test("ProjectsRepository tenant_id", repo.tenant_id == tenant_id)
         return True
     except Exception as e:
-        test("Repositorios tenant_id", False, str(e))
+        test("Repositorios tenant_id", False, type(e).__name__)
         return False
 
 
@@ -142,7 +145,7 @@ def test_connection_return():
         test("Conexion cerrada después de UoW", True)
         return True
     except Exception as e:
-        test("Conexion cerrada después de UoW", False, str(e))
+        test("Conexion cerrada después de UoW", False, type(e).__name__)
         return False
 
 
@@ -155,7 +158,7 @@ def main():
         print("Pool inicializado: OK\n")
         print("Conexión a PostgreSQL establecida")
     except Exception as e:
-        print(f"ERROR inicializando pool: {e}")
+        print(f"ERROR inicializando pool: {type(e).__name__}")
         sys.exit(1)
 
     # Ejecutar pruebas
@@ -177,7 +180,7 @@ def main():
     if errors:
         print("Errores:")
         for e in errors:
-            print(f"  - {e}")
+            print(f"  - {type(e).__name__}")
 
     if failed > 0:
         sys.exit(1)

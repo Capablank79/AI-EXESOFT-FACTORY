@@ -170,3 +170,48 @@ def verify_test_evidence(workspace, relative_path):
         return status == 'passed' and type(code) is int and code == 0 and type(count) is int and count > 0
     except (ValueError, KeyError, TypeError, OSError, json.JSONDecodeError):
         return False
+
+
+def validate_sandbox_execution_evidence(workspace, relative_paths):
+    """Return an enforceable Quality Gate decision for Sandy test evidence."""
+    refs = tuple(relative_paths or ())
+    reasons = []
+    verified = []
+    artifact_hashes = {}
+    if not refs:
+        return {'approved': False, 'reason': 'No se proporcionó evidencia de pruebas Sandy',
+                'checks': {'evidence_present': False, 'evidence_valid': False}}
+    for reference in refs:
+        if not isinstance(reference, str) or not verify_test_evidence(workspace, reference):
+            reasons.append(f'Evidencia ausente, modificada o fallida: {reference!s}')
+            continue
+        try:
+            root = Path(workspace).resolve(strict=True)
+            evidence_path = _inside(root, root / reference)
+            data = json.loads(evidence_path.read_text(encoding='utf-8'))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            reasons.append(f'Evidencia ilegible: {reference!s}')
+            continue
+        if data.get('runner') != 'sandy':
+            reasons.append(f'La evidencia no acredita ejecución Sandy: {reference}')
+            continue
+        if (data.get('status') != 'passed' or type(data.get('returncode')) is not int
+                or data.get('returncode') != 0 or type(data.get('sandy_exit_code')) is not int
+                or data.get('sandy_exit_code') != 0 or data.get('tests_run', 0) < 1):
+            reasons.append(f'La ejecución Sandy no superó todos los criterios: {reference}')
+            continue
+        verified.append(reference)
+        artifact_hashes[reference] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    approved = bool(verified) and not reasons
+    return {
+        'approved': approved,
+        'reason': 'Evidencia Sandy válida' if approved else '; '.join(reasons),
+        'evidence': verified,
+        'artifact_hashes': artifact_hashes,
+        'checks': {
+            'evidence_present': bool(refs),
+            'evidence_valid': approved,
+            'sandy_success': approved,
+            'tests_executed': approved,
+        },
+    }

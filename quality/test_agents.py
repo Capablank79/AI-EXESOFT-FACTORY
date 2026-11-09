@@ -2,14 +2,25 @@ import json
 import os
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 from engine.agents import FreeLLMAPIAdapter, ClaudeCodeAdapter, make_prompt
 from engine.agents import SandyDeveloperAdapter
 from engine.agent_runtime import AgentRuntime
 from engine.runtime import Result
+from plan_approval_test_support import approve_test_plan
 from engine.sandy_adapter import SandYSandboxResult
 from quality.evidence import verify_test_evidence
+
+TENANT_ID = uuid.UUID('b66f93cd-2f3a-4215-a2ac-93a59a84b4d2')
+ENV_PATH = Path(__file__).resolve().parents[1] / '.env'
+if ENV_PATH.exists():
+    for line in ENV_PATH.read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if line and not line.startswith('#') and '=' in line:
+            key, value = line.split('=', 1)
+            os.environ.setdefault(key.strip(), value.strip())
 
 TASK={'agent':'pm','title':'Definir alcance'}
 PROJECT={'name':'Exesoft','request':'Crear producto'}
@@ -94,10 +105,11 @@ class AgentTests(unittest.TestCase):
                 return Result(True,'Plan')
         with tempfile.TemporaryDirectory() as folder:
             spy=Spy()
-            runtime=AgentRuntime(folder,{'pm':spy})
+            runtime=AgentRuntime(folder,{'pm':spy},tenant_id=TENANT_ID)
             pid=runtime.orchestrator.create_project('Factory','Construir fábrica')
             runtime.orchestrator.plan_skeleton(pid)
-            runtime.brain.remember('decision','Definir alcance','Mantener arquitectura local','operador',pid)
+            approve_test_plan(TENANT_ID, pid)
+            runtime.brain.remember('note','Definir alcance','Mantener arquitectura local','operador',pid)
             result=runtime.step(pid)
             self.assertEqual(result['state'],'done')
             self.assertTrue(spy.context['knowledge'])

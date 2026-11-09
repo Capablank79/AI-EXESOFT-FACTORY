@@ -7,6 +7,7 @@ Autor: Claude Code - EXESOFT AI FACTORY
 
 import uuid
 import hashlib
+import json
 from typing import Optional, List
 from datetime import datetime
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ class Knowledge:
     confidence: Optional[float] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    idempotency_key: Optional[str] = None
 
 
 @dataclass
@@ -65,26 +67,64 @@ class MemoryRepository(Repository):
         tenant_id: Optional[uuid.UUID] = None,
         project_id: Optional[uuid.UUID] = None,
         tags: Optional[List[str]] = None,
-        confidence: Optional[float] = None
+        confidence: Optional[float] = None,
+        idempotency_key: Optional[str] = None
     ) -> Knowledge:
-        """Crear entrada de conocimiento."""
+        """Create knowledge; repeated operation keys return the original record."""
         query = """
-        INSERT INTO knowledge (tenant_id, project_id, kind, title, body, source, tags, confidence)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO knowledge
+            (tenant_id, project_id, kind, title, body, source, tags, confidence, idempotency_key)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (tenant_id, project_id, idempotency_key)
+            WHERE idempotency_key IS NOT NULL
+        DO UPDATE SET idempotency_key = knowledge.idempotency_key
+        WHERE knowledge.kind IS NOT DISTINCT FROM EXCLUDED.kind
+          AND knowledge.title IS NOT DISTINCT FROM EXCLUDED.title
+          AND knowledge.body IS NOT DISTINCT FROM EXCLUDED.body
+          AND knowledge.source IS NOT DISTINCT FROM EXCLUDED.source
+          AND knowledge.tags IS NOT DISTINCT FROM EXCLUDED.tags
+          AND knowledge.confidence IS NOT DISTINCT FROM EXCLUDED.confidence
         RETURNING *
         """
         params = [
             str(tenant_id) if tenant_id else None, str(project_id) if project_id else None,
-            kind, title, body, source, tags, confidence
+            kind, title, body, source, tags, confidence, idempotency_key
         ]
 
-        row = self._fetch_one(query, params)
-        return Knowledge(**row) if row else None
+        row = self._fetch_one(query, params, table_name="knowledge")
+        if row is None:
+            raise ValueError("Idempotency key reused with different knowledge data")
+        return Knowledge(**row)
 
     def get_knowledge(self, knowledge_id: uuid.UUID) -> Optional[Knowledge]:
         """Obtener entrada de conocimiento por ID."""
-        row = self._fetch_one("SELECT * FROM knowledge WHERE id = %s", [str(knowledge_id)])
+        row = self._fetch_one("SELECT * FROM knowledge WHERE id = %s", [str(knowledge_id)], table_name="knowledge")
         return Knowledge(**row) if row else None
+
+    def create_agent_handoff(self, handoff) -> Knowledge:
+        """Persist an idempotent structured handoff through the knowledge store."""
+        payload = handoff.to_dict()
+        destinations = ', '.join(handoff.to_agents) or 'project complete'
+        return self.create_knowledge(
+            kind='conversation',
+            title=f"Handoff: {handoff.from_agent} -> {destinations}",
+            body=json.dumps(payload, ensure_ascii=False, sort_keys=True),
+            source='agent_handoff', tenant_id=handoff.tenant_id,
+            project_id=handoff.project_id,
+            tags=['agent_handoff', handoff.from_agent, *handoff.to_agents],
+            confidence=1.0,
+            idempotency_key=f'agent-handoff:{handoff.run_id}',
+        )
+
+    def list_agent_handoffs(self, project_id: uuid.UUID, limit: int = 100) -> List[Knowledge]:
+        if limit < 1:
+            raise ValueError('limit must be positive')
+        rows = self._fetch_all(
+            "SELECT * FROM knowledge WHERE project_id = %s AND source = 'agent_handoff' "
+            "ORDER BY created_at ASC, id ASC LIMIT %s",
+            [str(project_id), limit], table_name='knowledge',
+        )
+        return [Knowledge(**row) for row in rows]
 
     def search_knowledge(
         self,
@@ -111,7 +151,7 @@ class MemoryRepository(Repository):
         base += " ORDER BY created_at DESC LIMIT %s"
         params.append(limit)
 
-        rows = self._fetch_all(base, params)
+        rows = self._fetch_all(base, params, table_name="knowledge")
         return [Knowledge(**row) for row in rows]
 
     def list_by_project(self, project_id: uuid.UUID, kind: Optional[str] = None) -> List[Knowledge]:
@@ -123,7 +163,7 @@ class MemoryRepository(Repository):
             params.append(kind)
         query += " ORDER BY created_at DESC"
 
-        rows = self._fetch_all(query, params)
+        rows = self._fetch_all(query, params, table_name="knowledge")
         return [Knowledge(**row) for row in rows]
 
     # ============== ODD DOCUMENTS ==============
@@ -131,7 +171,8 @@ class MemoryRepository(Repository):
         """Obtener documento ODD vigente de un proyecto."""
         row = self._fetch_one(
             "SELECT * FROM odd_documents WHERE project_id = %s",
-            [str(project_id)]
+            [str(project_id)],
+            table_name="odd_documents"
         )
         return OddDocument(**row) if row else None
 
@@ -142,6 +183,19 @@ class MemoryRepository(Repository):
         updated_by: Optional[uuid.UUID] = None
     ) -> OddDocument:
         """Crear o actualizar documento ODD."""
+        # Keep ODD plan edits serialized against approval and task claims.
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                query_lock = "SELECT id FROM projects WHERE id = %s"
+                lock_params = [str(project_id)]
+                if self.tenant_id is not None:
+                    query_lock += " AND tenant_id = %s"
+                    lock_params.append(str(self.tenant_id))
+                query_lock += " FOR UPDATE"
+                cur.execute(query_lock, lock_params)
+                if cur.fetchone() is None:
+                    raise ValueError('Project not found in the ODD tenant')
+
         query = """
         INSERT INTO odd_documents (project_id, body, last_updated, updated_by)
         VALUES (%s, %s, NOW(), %s)
@@ -153,7 +207,7 @@ class MemoryRepository(Repository):
         """
         params = [str(project_id), body, str(updated_by) if updated_by else None]
 
-        row = self._fetch_one(query, params)
+        row = self._fetch_one(query, params, table_name="odd_documents")
         return OddDocument(**row) if row else None
 
     def get_odd_version(
@@ -191,7 +245,8 @@ class MemoryRepository(Repository):
         # Get latest doc_id
         latest = self._fetch_one(
             "SELECT id FROM odd_snapshots WHERE project_id = %s ORDER BY created_at DESC LIMIT 1",
-            [str(project_id)]
+            [str(project_id)],
+            table_name="odd_snapshots"
         )
         doc_id = latest['id'] if latest else None
 

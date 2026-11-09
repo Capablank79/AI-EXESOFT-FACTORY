@@ -22,9 +22,8 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 import psycopg
 from psycopg import Error, OperationalError
 
-# Configuración logging - sin mostrar passwords
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+from infrastructure.observability import log_event
 
 
 @dataclass
@@ -44,6 +43,13 @@ class DBConfig:
         host = os.environ.get('POSTGRES_HOST', '127.0.0.1')
         port = int(os.environ.get('POSTGRES_PORT', '5432'))
         db = os.environ.get('POSTGRES_DB', 'exesoft_factory')
+
+        if os.environ.get('EXESOFT_TEST_DATABASE_REQUIRED') == '1':
+            expected = os.environ.get('EXESOFT_TEST_POSTGRES_DB', '')
+            if (not expected or db != expected or not db.startswith('exesoft_test_')
+                    or db in {'exesoft_factory', 'exesoft_backup_fixture_f7003_20261105',
+                              'exesoft_restore_f7003_20261105'}):
+                raise ValueError('PostgreSQL test guard requires an isolated exesoft_test_* database')
 
         if not password:
             raise ValueError(
@@ -134,10 +140,8 @@ def get_pool() -> ConnectionPool:
             open=False  # Se abre explícitamente
         )
         _pool.open()
-        logger.info(
-            f"Pool de conexiones PostgreSQL inicializado "
-            f"(min={_pool_config.min_size}, max={_pool_config.max_size}, timeout={_pool_config.timeout}s)"
-        )
+        log_event(logger, logging.INFO, 'postgres.pool.opened', component='postgres',
+                  status='opened')
 
     return _pool
 
@@ -149,8 +153,11 @@ def reset_pool() -> None:
         try:
             _pool.close()
         except Exception as e:
-            logger.warning(f"Error al cerrar pool: {e}")
+            log_event(logger, logging.WARNING, 'postgres.pool.close_failed', component='postgres',
+                      error_type=type(e).__name__)
         _pool = None
+    _config = None
+    _config = None
 
 
 @contextmanager
@@ -175,13 +182,16 @@ def get_connection() -> Generator[psycopg.Connection, None, None]:
         with pool.connection() as conn:
             yield conn
     except PoolTimeout as e:
-        logger.error(f"Timeout obteniendo conexión del pool: {e}")
+        log_event(logger, logging.ERROR, 'postgres.pool.timeout', component='postgres',
+                  error_type=type(e).__name__)
         raise ConnectionTimeoutError(f"Timeout obteniendo conexión: {e}") from e
     except OperationalError as e:
-        logger.error(f"Error de conexión: {e}")
+        log_event(logger, logging.ERROR, 'postgres.connection.failed', component='postgres',
+                  error_type=type(e).__name__)
         raise DatabaseError(f"Error de conexión: {e}") from e
     except Exception as e:
-        logger.error(f"Error inesperado con conexión: {e}")
+        log_event(logger, logging.ERROR, 'postgres.connection.failed', component='postgres',
+                  error_type=type(e).__name__)
         raise
 
 
@@ -191,9 +201,10 @@ def close_pool() -> None:
     if _pool is not None:
         try:
             _pool.close()
-            logger.info("Pool de conexiones PostgreSQL cerrado")
+            log_event(logger, logging.INFO, 'postgres.pool.closed', component='postgres')
         except Exception as e:
-            logger.error(f"Error al cerrar pool: {e}")
+            log_event(logger, logging.ERROR, 'postgres.pool.close_failed', component='postgres',
+                      error_type=type(e).__name__)
         finally:
             _pool = None
             _config = None
@@ -214,7 +225,8 @@ def health_check() -> bool:
                 result = cur.fetchone()
                 return result is not None and result[0] == 1
     except Exception as e:
-        logger.error(f"Health check fallido: {e}")
+        log_event(logger, logging.ERROR, 'postgres.health.failed', component='postgres',
+                  check='connectivity', error_type=type(e).__name__, outcome='unavailable')
         return False
 
 

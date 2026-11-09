@@ -5,7 +5,7 @@ from pathlib import Path
 from brain.store import Brain
 from engine.odd import ODDEngine, FeatureDocument
 from engine.orchestrator import Orchestrator
-from engine.runtime import Runtime, Result
+from engine.runtime import LegacySQLiteRuntime as Runtime, Result
 
 
 class OddPersistenceTests(unittest.TestCase):
@@ -13,7 +13,7 @@ class OddPersistenceTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.orchestrator = Orchestrator(self.root)
+        self.orchestrator = Orchestrator(self.root, backend='sqlite')
         self.pid = self.orchestrator.create_project('sample', 'sample request')
 
     def test_plan_document_is_complete_current_and_deduplicated(self):

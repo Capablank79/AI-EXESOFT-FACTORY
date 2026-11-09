@@ -31,10 +31,11 @@ if (Test-Path $envPath) {
 }
 
 # Ensure Python is available
-$pythonCmd = "C:\AI-Factory\.venv\Scripts\python.exe"
-if (-not (Test-Path $pythonCmd)) {
-    $pythonCmd = "python"
-}
+. (Join-Path $PSScriptRoot 'resolve-python.ps1')
+$pythonCmd = $FactoryPython
+$env:POSTGRES_DB = 'exesoft_test_f7004'
+$env:EXESOFT_TEST_POSTGRES_DB = 'exesoft_test_f7004'
+$env:EXESOFT_BACKUP_TEST_ENABLED = '0'
 
 # Run existing tests first
 Write-Host "`n1. Ejecutando pruebas base..." -ForegroundColor Yellow

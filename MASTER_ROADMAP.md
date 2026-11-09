@@ -1,8 +1,12 @@
 # EXESOFT AI FACTORY --- MASTER ROADMAP
 
 **Versión:** 1.0\
-**Estado:** F0 aprobada; F1-001 y F1-002 lista para revisión; F2-001, F2-002 y F2-003 READY_FOR_REVIEW\
+**Estado vigente (2026-11-06):** F0–F7 APPROVED; F8-001, F8-002 y F8-003 APPROVED; F8-004 IN_PROGRESS.\
 **Proyecto:** `C:\AI-Factory`
+
+Este estado vigente refleja las aprobaciones explícitas del operador y
+prevalece sobre los registros históricos de ejecución que siguen en el
+documento.
 
 ## Propósito
 
@@ -62,52 +66,52 @@ multiusuario.
   Fase              Nombre            Resultado         Estado
                                       esperado          
   ----------------- ----------------- ----------------- -----------------
-  F0                Auditoría de solo Inventario de     **Autorizada**
+  F0                Auditoría de solo Inventario de     **APPROVED**
                     lectura           Factory y         
                                       PostgreSQL; plan  
                                       de implementación 
                                       validado          
 
-  F1                PostgreSQL y      Base/roles        EXF-F1-001
-                    esquema inicial   iniciales         READY_FOR_REVIEW;
-                                      migraciones SQL   F1-002 BLOCKED   
+  F1                PostgreSQL y      Base/roles        **APPROVED**
+                    esquema inicial   iniciales y
+                                      migraciones SQL
 
-  F2                Capa de           Repositories,     READY_FOR_REVIEW
+  F2                Capa de           Repositories,     **APPROVED**
                     persistencia      Unit of Work,
                                       pool y pruebas   
 
-  F3                Brain y ODD       Memoria,          Pendiente
-                                      documentos ODD,   
-                                      specs y snapshots 
-                                      consistentes      
+  F3                Brain y ODD       Memoria,          **APPROVED**
+                    ODD, specs y
+                    snapshots
 
-  F4                Runtime y         Scheduler,        Pendiente
+  F4                Runtime y         Scheduler,        **APPROVED**
                     Orchestrator      dependencias,     
                                       concurrencia,     
                                       recuperación y    
                                       eventos           
 
-  F5                Model Gateway y   Adaptadores de    Pendiente
+  F5                Model Gateway y   Adaptadores de    **APPROVED**
                     agentes           modelos, registro 
                                       de proveedores y  
                                       handoffs          
 
-  F6                Sandy, artefactos Ejecución         Pendiente
+  F6                Sandy, artefactos Ejecución         **APPROVED**
                     y Quality Gate    aislada, hashes,  
                                       evidencias y      
                                       aprobación de     
                                       calidad           
 
-  F7                Operación local y CLI, API          Pendiente
+  F7                Operación local y CLI, API          **APPROVED**
                     API               preparada,        
                                       configuración,    
                                       logs, backups y   
                                       diagnóstico       
 
-  F8                Validación        Regresión,        Pendiente
+  F8                Validación        Regresión,        F8-001/002/003
                     integral          recuperación,     
                                       concurrencia y    
-                                      aceptación final  
+                                      aceptación final  APPROVED;
+                                                        F8-004 IN_PROGRESS
   -----------------------------------------------------------------------
 
 ## Protocolo de trabajo
@@ -134,7 +138,11 @@ operador puede aprobar y autorizar el siguiente ID.
 Revisar y aprobar expresamente `EXF-F1-001`. No iniciar
 `EXF-F1-002 — Migraciones SQL` hasta esa aprobación.
 
-## Avance registrado — 2026-11-01
+## Registro histórico — 2026-11-01
+
+Los estados de tarea descritos en este registro corresponden a la captura
+histórica del 2026-11-01 y no sustituyen el estado vigente al inicio del
+documento.
 
 ### EXF-F0-001
 - `EXF-F0-001`: **APPROVED** por el operador.
@@ -225,3 +233,25 @@ Revisar y aprobar expresamente `EXF-F1-001`. No iniciar
 - Repositorios ajustados para respetar la conexión inyectada: identidad,
   proyectos, planificación y artefactos.
 - Pruebas automatizadas existentes: `tests/test_uow.py`
+
+### EXF-F3-001
+- `EXF-F3-001`: **READY_FOR_REVIEW**.
+- Brain migrado a PostgreSQL usando repositorios existentes.
+- Archivos creados:
+  - `brain/postgres_store.py` - Brain PostgreSQL con interfaz compatible
+  - `infrastructure/repositories/odd_links.py` - Repositorio enlaces ODD-Task
+  - `tests/test_brain_postgres.py` - Pruebas unitarias completas
+  - `tests/test_brain_f3001_simple.py` - Pruebas funcionales end-to-end
+  - `scripts/run_tests_f3001.ps1` - Script de ejecución
+  - `docs/EXF-F3-001_RESULTADO.md` - Documentación de resultados
+- Funcionalidad implementada:
+  - Memoria de trabajo/episódica/semántica: `remember()`, `recall()`, `list_knowledge()`
+  - Documentos ODD: `save_odd_document()`, `persist_odd_document()`, `get_odd_document()`
+  - Snapshots históricos: almacenados en `knowledge` con kind='odd_spec'
+  - Enlaces ODD-Task: `link_odd_task()`, `brain_task_for_odd()`, `odd_task_for_brain()`
+  - Proyectos y tareas: delegados a `ProjectsRepository` y `PlanningRepository`
+- Aislamiento por `tenant_id` y transacciones via Unit of Work.
+- Idempotencia garantizada con `ON CONFLICT` en todas las operaciones.
+- Desacople SQLite: parámetro `db_path` ignorado, código heredado preservado.
+- Reutilización esquema: usa tablas `knowledge`, `odd_documents`, `tasks`, `projects` existentes.
+- Sin ORM, sin nuevas bases, sin pgvector, sin modificaciones a Runtime/Sandy/Model Gateway.

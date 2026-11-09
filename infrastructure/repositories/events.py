@@ -55,8 +55,8 @@ class EventsRepository(Repository):
     ) -> Event:
         """Emitir un evento del sistema."""
         query = """
-        INSERT INTO events (tenant_id, project_id, task_id, type, detail)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO events (tenant_id, project_id, task_id, type, detail, created_at)
+        VALUES (%s, %s, %s, %s, %s, clock_timestamp())
         RETURNING *
         """
         params = [
@@ -125,6 +125,25 @@ class EventsRepository(Repository):
         base += " ORDER BY created_at ASC"
 
         rows = self._fetch_all(base, params)
+        return [Event(**row) for row in rows]
+
+    def execution_trace(
+        self,
+        project_id: uuid.UUID,
+        task_id: Optional[uuid.UUID] = None,
+        limit: int = 1000,
+    ) -> List[Event]:
+        """Return a tenant-scoped execution timeline in chronological order."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        query = "SELECT * FROM events WHERE project_id = %s"
+        params = [str(project_id)]
+        if task_id is not None:
+            query += " AND task_id = %s"
+            params.append(str(task_id))
+        query += " ORDER BY created_at ASC, id ASC LIMIT %s"
+        params.append(limit)
+        rows = self._fetch_all(query, params, table_name="events")
         return [Event(**row) for row in rows]
 
     # ============== AUDIT LOG ==============
